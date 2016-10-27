@@ -8,7 +8,7 @@ import requests
 import logging
 import getopt
 import sys
-from libs import slacksend
+#from libs import slacksend
 
 
 def init_configuration():
@@ -66,34 +66,35 @@ def init_configuration():
         elif cmd_opt in ("--action"):
             configuration["snapshot_action"] = cmd_arg
 
+    # Enable debug for status action
+    if configuration["snapshot_action"] == "status":
+        configuration["debug"] = True
+
     # Load configuration from environment
     configuration["aws_region"] = getenv("AWS_DEFAULT_REGION", configuration["aws_region"])
     configuration["aws_key_id"] = getenv("AWS_ACCESS_KEY_ID", configuration["aws_key_id"])
     configuration["aws_key_secret"] = getenv("AWS_SECRET_ACCESS_KEY", configuration["aws_key_secret"])
 
+
     # Configure logging
     logging.basicConfig(filename=configuration['log_location'], filemode='w', level=logging.INFO)
-
     return configuration
 
 
 def show_help():
     print """Saritasa AWS snapshot tool
-    Usage:
-       -h, --help - for help
-       -d, --debug - show debug information
-       --config='' - set path for configuration file
-       --aws_key_id='' - set AWS_ACCESS_KEY_ID
-       --aws_secret_key='' - set AWS_SECRET_ACCESS_KEY
-       --aws_region='' - set AWS_DEFAULT_REGION
-       --action='' - set script action - 'default\delete\\create\status'
-       --snapshot_name='' - set custom snapshot prefix name. Default: %instance_name%-%volume_id%-%date_short%
-       --snapshot_expire_search='volume-id|instance-id-tag' - search expired snapshots by special instance-id-tag or by attached
-       +volume-id+
-
-       --snapshot_expire_days= - set amount of days after that snapshots will be expired
-       --snapshot_save_count= - minimum number of snapshots for save
-    """
+Usage:
+   -h, --help - for help
+   -d, --debug - show debug information
+   --config='' - set path for configuration file
+   --aws_key_id='' - set AWS_ACCESS_KEY_ID
+   --aws_secret_key='' - set AWS_SECRET_ACCESS_KEY
+   --aws_region='' - set AWS_DEFAULT_REGION
+   --action='' - set script action - 'default\delete\\create\status'
+   --snapshot_name='' - set custom snapshot prefix name. Default: %instance_name%-%volume_id%-%date_short%
+   --snapshot_expire_search='volume-id|instance-id-tag' - search expired snapshots by special instance-id-tag or by attached volume-id
+   --snapshot_expire_days= - set amount of days after that snapshots will be expired
+   --snapshot_save_count= - minimum number of snapshots for save"""
     sys.exit(0)
 
 
@@ -183,26 +184,40 @@ def ec2_get_instance_volumes(instance_id):
 
 
 def ec2_get_instance_snapshots(instance_id):
-    device_list = []
     snapshots_filtered = None
+    instance_volumes_list = []
     snapshot_list_expired = []
     snapshot_list_total = []
+    snapshots_dict = {'snapshots_list_total': [],
+                      'snapshot_list_expired': [],
+                      'snapshots_list_volumes': {}}
+
+    # Get all attached volumes from instance
+    instance = ec2.Instance(instance_id)
+    for device in instance.block_device_mappings:
+        instance_volumes_list.append(device["Ebs"]["VolumeId"])
 
     if configuration['snapshot_expire_search'] == 'instance-id-tag':
         snapshots_filtered = ec2.snapshots.filter(Filters=[{"Name": "tag:InstanceId", "Values": [instance_id]}])
 
     elif configuration['snapshot_expire_search'] == 'volume-id':
-        instance = ec2.Instance(instance_id)
-        for device in instance.block_device_mappings:
-            device_list.append(device["Ebs"]["VolumeId"])
-        snapshots_filtered = ec2.snapshots.filter(Filters=[{"Name": "volume-id", "Values": device_list}])
+        snapshots_filtered = ec2.snapshots.filter(Filters=[{"Name": "volume-id", "Values": instance_volumes_list}])
 
-    for snapshot in snapshots_filtered:
-        snapshot_list_total.append(snapshot)
+    snapshot_list_total = list(snapshots_filtered)
+    # for snapshot in snapshots_filtered:
+    #     snapshot_list_total.append(snapshot)
+    #     snapshots_dict['snapshots_list_total'].append(snapshot)
 
     for snapshot in snapshot_list_total:
-        if (current_date - snapshot.start_time).days > configuration["snapshot_expire_days"]:
+        if (current_date - snapshot.start_time).days + 1 > configuration["snapshot_expire_days"]:
             snapshot_list_expired.append(snapshot)
+            snapshots_dict['snapshot_list_expired'].append(snapshot)
+
+    for volume in instance_volumes_list:
+        snapshots_volume_filtered = ec2.snapshots.filter(Filters=[{"Name": "volume-id", "Values": [volume]}])
+        snapshots_dict['snapshots_list_volumes'].update({volume: list(snapshots_volume_filtered)})
+
+    print snapshots_dict['snapshots_list_volumes'].keys()
 
     return snapshot_list_total, snapshot_list_expired
 
@@ -234,47 +249,47 @@ def ec2_create_snapshot(volume_id):
         return False
 
 
-def slack_send_notification():
-    if not configuration["slack_connection"]["api_key"]:
-        print_debug_message("Error: Slack key does not exists")
-        return
-
-    if configuration["snapshot_action"] == "status":
-        print_debug_message("Info: Runned with status action")
-        return
-
-    slack_client = slacksend.SlackSender(configuration["slack_connection"]["api_key"])
-    attachment = {"fallback": "", "title": "", "title_link": "", "text": "", " color": "", "mrkdwn_in": ["text"]}
-    slack_message_body = "*InstanceID:* {0}\n*InstanceName:* {1}".format(current_instance_id, current_instance_name)
-    slack_message = ''
-    slack_icon = ''
-
-    if exceptions_pool and "failure" in configuration["slack_notify_on"]:
-        attachment["title"] = "Backup: failure"
-        slack_icon = configuration["slack_connection"]["bot_icon_failure"]
-        attachment["color"] = "#F71138"
-        slack_message = slack_message_body
-
-        for exception_message in exceptions_pool:
-            slack_message = "{0}\n{1}".format(slack_message, exception_message)
-    else:
-        if "success" in configuration["slack_notify_on"]:
-            attachment["title"] = "Backup: success"
-            attachment["color"] = "#36a64f"
-            slack_icon = configuration["slack_connection"]["bot_icon_success"]
-            slack_message = "{0}\n*Snapshots:* {1}".format(slack_message_body, ", ".join(created_snapshots_pool))
-            slack_message = "{0}\n*Snapshots total:* {1}".format(slack_message, len(current_instance_snapshots_list))
-
-    attachment["text"] = slack_message
-    attachment["title_link"] = "https://{0}.console.aws.amazon.com/console/home?region={0}".format(configuration["aws_region"])
-
-    if slack_message:
-        for user in configuration["slack_users"]:
-            slack_client.send_message(channel=user,
-                                      username=configuration["slack_connection"]["bot_name"],
-                                      icon_emoji=slack_icon,
-                                      attachments=[attachment])
-            print_debug_message("Sending slack message to: {0} - {1}".format(user, slack_message))
+# def slack_send_notification():
+#     if not configuration["slack_connection"]["api_key"]:
+#         print_debug_message("Error: Slack key does not exists")
+#         return
+#
+#     if configuration["snapshot_action"] == "status":
+#         print_debug_message("Info: Runned with status action")
+#         return
+#
+#     slack_client = slacksend.SlackSender(configuration["slack_connection"]["api_key"])
+#     attachment = {"fallback": "", "title": "", "title_link": "", "text": "", " color": "", "mrkdwn_in": ["text"]}
+#     slack_message_body = "*InstanceID:* {0}\n*InstanceName:* {1}".format(current_instance_id, current_instance_name)
+#     slack_message = ''
+#     slack_icon = ''
+#
+#     if exceptions_pool and "failure" in configuration["slack_notify_on"]:
+#         attachment["title"] = "Backup: failure"
+#         slack_icon = configuration["slack_connection"]["bot_icon_failure"]
+#         attachment["color"] = "#F71138"
+#         slack_message = slack_message_body
+#
+#         for exception_message in exceptions_pool:
+#             slack_message = "{0}\n{1}".format(slack_message, exception_message)
+#     else:
+#         if "success" in configuration["slack_notify_on"]:
+#             attachment["title"] = "Backup: success"
+#             attachment["color"] = "#36a64f"
+#             slack_icon = configuration["slack_connection"]["bot_icon_success"]
+#             slack_message = "{0}\n*Snapshots:* {1}".format(slack_message_body, ", ".join(created_snapshots_pool))
+#             slack_message = "{0}\n*Snapshots total:* {1}".format(slack_message, len(current_instance_snapshots_list - current_instance_expired_snapshots_list))
+#
+#     attachment["text"] = slack_message
+#     attachment["title_link"] = "https://{0}.console.aws.amazon.com/console/home?region={0}".format(configuration["aws_region"])
+#
+#     if slack_message:
+#         for user in configuration["slack_users"]:
+#             slack_client.send_message(channel=user,
+#                                       username=configuration["slack_connection"]["bot_name"],
+#                                       icon_emoji=slack_icon,
+#                                       attachments=[attachment])
+#             print_debug_message("Sending slack message to: {0} - {1}".format(user, slack_message))
 
 
 if __name__ == "__main__":
@@ -289,7 +304,8 @@ if __name__ == "__main__":
     exceptions_pool = []
     created_snapshots_pool = []
     configuration = init_configuration()
-    current_instance_id = ec2_get_instance_id()
+    # current_instance_id = ec2_get_instance_id()
+    current_instance_id = 'i-d69bcbdc'
 
     # Init AWS session
     try:
@@ -308,6 +324,22 @@ if __name__ == "__main__":
     current_instance_name = ec2_get_instance_name(current_instance_id)
     print_debug_message("InstanceID: {0}\nInstanceName: {1}".format(current_instance_id, current_instance_name))
 
+
+    # Delete expired snapshots
+    current_instance_snapshots_list, current_instance_expired_snapshots_list = ec2_get_instance_snapshots(
+        current_instance_id)
+    snapshots_left = len(current_instance_snapshots_list)
+
+    for snapshot_id in current_instance_expired_snapshots_list:
+        if snapshots_left <= configuration["snapshot_save_count"]:
+            break
+
+        if configuration["snapshot_action"] in ("default", "delete"):
+            print_debug_message("deleting snapshot id: {0}".format(snapshot_id.description))
+            snapshot_id.delete()
+        snapshots_left -= 1
+
+
     # Start making snapshots
     if "all" in configuration["snapshot_volumes"]:
         snapshot_volumes = ec2_get_instance_volumes(current_instance_id)
@@ -319,21 +351,8 @@ if __name__ == "__main__":
             ec2_create_snapshot(volume_id)
             created_snapshots_pool.append(volume_id)
 
-    current_instance_snapshots_list, current_instance_expired_snapshots_list = ec2_get_instance_snapshots(current_instance_id)
-    snapshots_left = len(current_instance_snapshots_list)
 
-
-    # Delete expired snapshots
-    for snapshot_id in current_instance_expired_snapshots_list:
-        if snapshots_left <= configuration["snapshot_save_count"]:
-            break
-
-        if configuration["snapshot_action"] in ("default", "delete"):
-            print_debug_message("deleting snapshot id: {0}".format(snapshot_id.description))
-            snapshot_id.delete()
-        snapshots_left -= 1
-
-    slack_send_notification()
+    # slack_send_notification()
     print_debug_message("Snapshots total: {0}".format(len(current_instance_snapshots_list)))
     print_debug_message("Snapshots expired: {0}".format(len(current_instance_expired_snapshots_list)))
     print_debug_message("Exit")
