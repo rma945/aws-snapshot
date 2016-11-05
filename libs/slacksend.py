@@ -13,5 +13,9 @@ class SlackSender():
         payload_json = json.dumps(payload)
         data = urlencode({"payload": payload_json})
         req = urlrequest.Request(self.api_url)
-        response = self.url_opener.open(req, data.encode('utf-8')).read()
+        try:
+            response = self.url_opener.open(req, data.encode('utf-8')).read()
+        except:
+            print "failed connect to slack hook"
+            return 1
         return response.decode('utf-8')

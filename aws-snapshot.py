@@ -8,7 +8,7 @@ import requests
 import logging
 import getopt
 import sys
-from libs import slacksend
+from libs import slacksend, emailsend
 
 
 def init_configuration():
@@ -234,6 +234,45 @@ def ec2_create_snapshot(volume_id):
         return False
 
 
+def message_replace_macros(message_text):
+    macros_dict = {"%instance_id%": current_instance_id,
+                   "%instance_name%": current_instance_name,
+                   "%instance_volumes%": ", ".join(map(str, current_instance_snapshots_dict["snapshots_list_volumes"])),
+                   "%instance_snapshots_total%": len(current_instance_snapshots_dict["snapshots_list_total"]),
+                   "%error_logs%": "\n".join(map(str, exceptions_pool))}
+
+    for macro in macros_dict.keys():
+        message_text = message_text.replace(macro, str(macros_dict[macro]))
+
+    return message_text
+
+
+def email_send_notifications():
+    email_action = None
+
+    # if configuration["snapshot_action"] == "status":
+    #     print_debug_message("Info: Runned with status action. Email message will be not send")
+    #     return
+
+    if exceptions_pool and "failure" in configuration["email_notify_on"]:
+        email_action = "failure"
+    elif "success" in configuration["email_notify_on"]:
+        email_action = "success"
+    else:
+        print_debug_message("Info: Email notifications disabled")
+        return
+
+    email_client = emailsend.EmailSender(email_server_config=configuration["smtp_connection"])
+    email_subject = message_replace_macros(configuration["email_message_template"][email_action]["subject"])
+    email_message = message_replace_macros(configuration["email_message_template"][email_action]["text"])
+
+    for user in configuration["email_users"]:
+        print_debug_message("Sending email message to: {0}".format(user))
+        email_client.send_email(email_to=user,
+                                email_subject=email_subject,
+                                email_text=email_message)
+
+
 def slack_send_notification():
     if not configuration["slack_connection"]["api_key"] and configuration["slack_notify_on"]:
         print_debug_message("Error: Slack key does not exists")
@@ -253,19 +292,9 @@ def slack_send_notification():
         return
 
     slack_client = slacksend.SlackSender(configuration["slack_connection"]["api_key"])
-    macros_dict = {"%instance_id%": current_instance_id,
-                   "%instance_name%": current_instance_name,
-                   "%instance_volumes%": ", ".join(map(str, current_instance_snapshots_dict["snapshots_list_volumes"])),
-                   "%instance_snapshots_total%": len(current_instance_snapshots_dict["snapshots_list_total"]),
-                   "%error_logs%": "\n".join(map(str, exceptions_pool))}
 
-    slack_title = configuration["slack_message_template"][slack_action]["title"]
-    slack_message = configuration["slack_message_template"][slack_action]["text"]
-
-    for macro in macros_dict.keys():
-        slack_title = slack_title.replace(macro, str(macros_dict[macro]))
-        slack_message = slack_message.replace(macro, str(macros_dict[macro]))
-
+    slack_title = message_replace_macros(configuration["slack_message_template"][slack_action]["title"])
+    slack_message = message_replace_macros(configuration["slack_message_template"][slack_action]["text"])
     attachment = {"fallback": "",
                   "title": slack_title,
                   "title_link": "https://{0}.console.aws.amazon.com/console/home?region={0}".format(configuration["aws_region"]),
@@ -339,9 +368,10 @@ if __name__ == "__main__":
             created_snapshots_pool.append(volume_id)
 
     # fix this for speedup
-    current_instance_snapshots_dict = ec2_get_instance_snapshots(current_instance_id)
+    #current_instance_snapshots_dict = ec2_get_instance_snapshots(current_instance_id)
 
-    slack_send_notification()
+    #slack_send_notification()
     print_debug_message("Snapshots total: {0}".format(len(current_instance_snapshots_dict['snapshots_list_total'])))
     print_debug_message("Snapshots expired: {0}".format(len(current_instance_snapshots_dict['snapshots_list_expired'])))
+    email_send_notifications()
     print_debug_message("Exit")
