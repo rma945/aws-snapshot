@@ -149,6 +149,17 @@ def snapshot_generate_name(instance_name="", volume_id=""):
     return snapshot_name
 
 
+def ec2_get_instance_region():
+    if not configuration["aws_region"]:
+        try:
+            response = requests.get('http://169.254.169.254/latest/meta-data/placement/availability-zone', timeout=5)
+            return response.text
+        except requests.exceptions.ConnectTimeout:
+            log_error("Failed to get instance AWS region")
+    else:
+        return configuration["aws_region"]
+
+
 def ec2_get_instance_id():
     try:
         response = requests.get("http://169.254.169.254/latest/meta-data/instance-id", timeout=5)
@@ -191,7 +202,6 @@ def ec2_get_instance_volumes(instance_id):
 
 
 def ec2_get_instance_snapshots(instance_id):
-    snapshots_filtered = None
     if "all" in configuration["snapshot_volumes"]:
         instance_volumes_list = ec2_get_instance_volumes(instance_id)
     else:
@@ -250,8 +260,6 @@ def message_replace_macros(message_text):
 
 
 def email_send_notifications():
-    email_action = None
-
     if configuration["snapshot_action"] == "status":
         print_debug_message("Info: Runned with status action. Email message will be not send")
         return
@@ -284,7 +292,6 @@ def slack_send_notification():
         print_debug_message("Info: Runned with status action. Slack message will be not send")
         return
 
-    slack_action = None
     if exceptions_pool and "failure" in configuration["slack_notify_on"]:
         slack_action = "failure"
     elif "success" in configuration["slack_notify_on"]:
@@ -294,9 +301,9 @@ def slack_send_notification():
         return
 
     slack_client = slacksend.SlackSender(configuration["slack_connection"]["api_key"])
-
     slack_title = message_replace_macros(configuration["slack_message_template"][slack_action]["title"])
     slack_message = message_replace_macros(configuration["slack_message_template"][slack_action]["text"])
+    bot_name = message_replace_macros(configuration["slack_connection"]["bot_name"])
     attachment = {"fallback": "",
                   "title": slack_title,
                   "title_link": "https://{0}.console.aws.amazon.com/console/home?region={0}".format(configuration["aws_region"]),
@@ -306,7 +313,7 @@ def slack_send_notification():
 
     for user in configuration["slack_users"]:
         slack_client.send_message(channel=user,
-                                  username=configuration["slack_connection"]["bot_name"],
+                                  username=bot_name,
                                   icon_emoji=configuration["slack_message_template"][slack_action]["icon"],
                                   attachments=[attachment])
 
@@ -328,7 +335,7 @@ if __name__ == "__main__":
 
     # Init AWS session
     try:
-        aws_session = boto3.Session(region_name=configuration["aws_region"],
+        aws_session = boto3.Session(region_name=ec2_get_instance_region(),
                                     aws_access_key_id=configuration["aws_key_id"],
                                     aws_secret_access_key=configuration["aws_key_secret"])
     except botocore.exceptions.ClientError as e:
