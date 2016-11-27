@@ -1,0 +1,55 @@
+{
+    "aws_region": "us-west-2",
+    "aws_key_id": "",
+    "aws_key_secret": "",
+    "aws_api_version": "2015-10-01",
+    "snapshot_action": "default",
+    "snapshot_volumes": ["all"],
+    "snapshot_name": "%instance_name%-%volume_id%-%date_short%",
+    "snapshot_expire_search": "instance-id-tag",
+    "snapshot_expire_days": 15,
+    "snapshot_save_count": 1,
+    "slack_notify_on": ["failure", "success"],
+    "email_notify_on": ["failure"],
+    "smtp_connection": {
+        "server": "smtp.myserver.com",
+        "port": 587,
+        "tls": true,
+        "user": "smtp_user",
+        "password": "smtp_password",
+        "from": "aws-snapshot@myserver.com"
+    },
+    "email_users": ["myemail@myserver.com", "my-second-email@myserver.com"],
+    "email_message_template": {
+        "failure": {
+            "subject": "Backup for %instance_name%:%instance_id% - failed",
+            "text": "InstanceID: %instance_id%\nInstanceName: %instance_name%\nVolumes: %instance_volumes%\nSnapshots: %instance_snapshots_total%"
+        },
+        "success": {
+            "subject": "Backup for %instance_name%:%instance_id% - success",
+            "text": "InstanceID: %instance_id%\nInstanceName: %instance_name%\nVolumes: %instance_volumes%\nSnapshots: %instance_snapshots_total%"
+        }
+    },
+    "slack_connection": {
+        "api_key": "https://hooks.slack.com/services/xxxxxxxx",
+        "bot_name": "aws-backup-bot"
+    },
+    "slack_message_template": {
+        "failure": {
+            "title": "Backup: failure",
+            "icon": ":broken_heart:",
+            "line_color": "#F71138",
+            "text": "*InstanceID:* %instance_id%\n*InstanceName:* %instance_name%\n*Volumes:* %instance_volumes_wt%\n*Snapshots:* %instance_snapshots_total%\n*Errors:* %error_logs%"
+        },
+        "success": {
+            "title": "Backup: success",
+            "icon": ":heart:",
+            "line_color": "#36a64f",
+            "text": "*InstanceID:* %instance_id%\n*InstanceName:* %instance_name%\n*Volumes:* %instance_volumes_wt%\n*Snapshots:* %instance_snapshots_total%"
+        }
+    },
+    "slack_users": ["#rma_test"],
+    "log_location": "/tmp/aws-snapshot.log",
+    "log_level": "INFO",
+    "debug": true
+}

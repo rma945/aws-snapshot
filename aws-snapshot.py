@@ -4,6 +4,7 @@ from datetime import datetime
 from pytz import UTC
 from os import getenv, path
 from json import load
+from tempfile import gettempdir
 import requests
 import logging
 import getopt
@@ -32,7 +33,7 @@ def init_configuration():
                              "bot_icon_failure": ":broken_heart:"},
         "slack_message_template": {"failure": [], "success": []},
         "slack_users": [""],
-        "log_location": "/tmp/aws-snapshot.log",
+        "log_location": "{0}/aws-snapshot.log".format(gettempdir()),
         "log_level": "INFO",
         "debug": True
     }
@@ -64,6 +65,7 @@ def init_configuration():
         elif cmd_opt in ("-d", "--debug"):
             configuration["debug"] = True
         elif cmd_opt in ("--action"):
+
             configuration["snapshot_action"] = cmd_arg
 
     # Enable debug for status action
@@ -74,7 +76,6 @@ def init_configuration():
     configuration["aws_region"] = getenv("AWS_DEFAULT_REGION", configuration["aws_region"])
     configuration["aws_key_id"] = getenv("AWS_ACCESS_KEY_ID", configuration["aws_key_id"])
     configuration["aws_key_secret"] = getenv("AWS_SECRET_ACCESS_KEY", configuration["aws_key_secret"])
-
 
     # Configure logging
     logging.basicConfig(filename=configuration['log_location'], filemode='w', level=logging.INFO)
@@ -191,28 +192,28 @@ def ec2_get_instance_volumes(instance_id):
 
 def ec2_get_instance_snapshots(instance_id):
     snapshots_filtered = None
-    instance_volumes_list = ec2_get_instance_volumes(instance_id)
+    if "all" in configuration["snapshot_volumes"]:
+        instance_volumes_list = ec2_get_instance_volumes(instance_id)
+    else:
+        instance_volumes_list = configuration["snapshot_volumes"]
+
     snapshots_dict = {'snapshots_list_total': [],
                       'snapshots_list_expired': [],
                       'snapshots_list_volumes': {},
                       'snapshots_list_volumes_expired': {}}
 
-    if configuration['snapshot_expire_search'] == 'instance-id-tag':
-        snapshots_filtered = ec2.snapshots.filter(Filters=[{"Name": "tag:InstanceId", "Values": [instance_id]}])
-
-    elif configuration['snapshot_expire_search'] == 'volume-id':
-        snapshots_filtered = ec2.snapshots.filter(Filters=[{"Name": "volume-id", "Values": instance_volumes_list}])
+    snapshots_filtered = ec2.snapshots.filter(Filters=[{"Name": "tag:InstanceId", "Values": [instance_id]}])
 
     for volume in instance_volumes_list:
-        snapshots_volume_filtered = ec2.snapshots.filter(Filters=[{"Name": "volume-id", "Values": [volume]}])
+        snapshots_volume_filtered = snapshots_filtered.filter(Filters=[{"Name": "volume-id", "Values": [volume]}])
         snapshots_dict['snapshots_list_volumes'].update({volume: list(snapshots_volume_filtered)})
         snapshots_dict['snapshots_list_volumes_expired'].update({volume: []})
+        snapshots_dict['snapshots_list_total'] += list(snapshots_volume_filtered)
 
         for snapshot in snapshots_volume_filtered:
             if (current_date - snapshot.start_time).days + 1 > configuration["snapshot_expire_days"]:
                 snapshots_dict['snapshots_list_volumes_expired'][volume].append(snapshot)
 
-        snapshots_dict['snapshots_list_total'] = list(snapshots_filtered)
         snapshots_dict['snapshots_list_expired'] += snapshots_dict['snapshots_list_volumes_expired'][volume]
 
     return snapshots_dict
@@ -238,6 +239,7 @@ def message_replace_macros(message_text):
     macros_dict = {"%instance_id%": current_instance_id,
                    "%instance_name%": current_instance_name,
                    "%instance_volumes%": ", ".join(map(str, current_instance_snapshots_dict["snapshots_list_volumes"])),
+                   "%instance_volumes_wt%": ", ".join("{0}: {1}".format(volume, len(snapshot)) for volume, snapshot in current_instance_snapshots_dict["snapshots_list_volumes"].items()),
                    "%instance_snapshots_total%": len(current_instance_snapshots_dict["snapshots_list_total"]),
                    "%error_logs%": "\n".join(map(str, exceptions_pool))}
 
@@ -250,9 +252,9 @@ def message_replace_macros(message_text):
 def email_send_notifications():
     email_action = None
 
-    # if configuration["snapshot_action"] == "status":
-    #     print_debug_message("Info: Runned with status action. Email message will be not send")
-    #     return
+    if configuration["snapshot_action"] == "status":
+        print_debug_message("Info: Runned with status action. Email message will be not send")
+        return
 
     if exceptions_pool and "failure" in configuration["email_notify_on"]:
         email_action = "failure"
@@ -321,10 +323,8 @@ if __name__ == "__main__":
     default_config_file = "{0}/snapshot.json".format(working_directory)
     current_date = datetime.now(UTC)
     exceptions_pool = []
-    created_snapshots_pool = []
     configuration = init_configuration()
-    # current_instance_id = ec2_get_instance_id()
-    current_instance_id = 'i-d69bcbdc'
+    current_instance_id = ec2_get_instance_id()
 
     # Init AWS session
     try:
@@ -343,35 +343,30 @@ if __name__ == "__main__":
     current_instance_name = ec2_get_instance_name(current_instance_id)
     print_debug_message("InstanceID: {0}\nInstanceName: {1}".format(current_instance_id, current_instance_name))
 
-    # Delete expired snapshots
+    # Snapshots actions start
     current_instance_snapshots_dict = ec2_get_instance_snapshots(current_instance_id)
-    snapshots_left = len(current_instance_snapshots_dict['snapshots_list_total'])
 
-    for snapshot_id in current_instance_snapshots_dict['snapshots_list_expired']:
-        if snapshots_left <= configuration["snapshot_save_count"]:
-            break
+    # Snapshots - delete expired
+    if configuration["snapshot_action"] in ("default", "delete"):
+        for snapshot_volume in current_instance_snapshots_dict['snapshots_list_volumes_expired']:
 
-        if configuration["snapshot_action"] in ("default", "delete"):
-            print_debug_message("deleting snapshot id: {0}".format(snapshot_id.description))
-            snapshot_id.delete()
-        snapshots_left -= 1
+            for snapshot_id in current_instance_snapshots_dict['snapshots_list_volumes_expired'][snapshot_volume]:
+                # Save reserved snapshots
+                if len(current_instance_snapshots_dict['snapshots_list_volumes'][snapshot_volume]) <= configuration["snapshot_save_count"]:
+                    break
+                snapshot_id.delete()
+                current_instance_snapshots_dict['snapshots_list_total'].remove(snapshot_id)
+                current_instance_snapshots_dict['snapshots_list_expired'].remove(snapshot_id)
+                current_instance_snapshots_dict['snapshots_list_volumes_expired'][snapshot_volume].remove(snapshot_id)
+                print_debug_message("volume: {0} deleting snapshot id: {1}".format(snapshot_volume, snapshot_id))
 
     # Start making snapshots
-    if "all" in configuration["snapshot_volumes"]:
-        snapshot_volumes = ec2_get_instance_volumes(current_instance_id)
-    else:
-        snapshot_volumes = configuration["snapshot_volumes"]
-
     if configuration["snapshot_action"] in ("default", "create"):
-        for volume_id in snapshot_volumes:
+        for volume_id in current_instance_snapshots_dict['snapshots_list_volumes_expired']:
             ec2_create_snapshot(volume_id)
-            created_snapshots_pool.append(volume_id)
 
-    # fix this for speedup
-    #current_instance_snapshots_dict = ec2_get_instance_snapshots(current_instance_id)
-
-    #slack_send_notification()
+    slack_send_notification()
+    email_send_notifications()
     print_debug_message("Snapshots total: {0}".format(len(current_instance_snapshots_dict['snapshots_list_total'])))
     print_debug_message("Snapshots expired: {0}".format(len(current_instance_snapshots_dict['snapshots_list_expired'])))
-    email_send_notifications()
     print_debug_message("Exit")
