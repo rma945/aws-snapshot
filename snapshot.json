@@ -3,7 +3,7 @@
     "aws_key_id": "",
     "aws_key_secret": "",
     "aws_api_version": "2015-10-01",
-    "snapshot_action": "default",
+    "snapshot_action": "status",
     "snapshot_volumes": ["all"],
     "snapshot_name": "%instance_name%-%volume_id%-%date_short%",
     "snapshot_expire_search": "instance-id-tag",
@@ -22,11 +22,11 @@
     "email_users": ["myemail@myserver.com", "my-second-email@myserver.com"],
     "email_message_template": {
         "failure": {
-            "subject": "Backup for %instance_name%:%instance_id% - failed",
+            "subject": "%action% for %instance_name%:%instance_id% - failed",
             "text": "InstanceID: %instance_id%\nInstanceName: %instance_name%\nVolumes: %instance_volumes%\nSnapshots: %instance_snapshots_total%"
         },
         "success": {
-            "subject": "Backup for %instance_name%:%instance_id% - success",
+            "subject": "%action% for %instance_name%:%instance_id% - success",
             "text": "InstanceID: %instance_id%\nInstanceName: %instance_name%\nVolumes: %instance_volumes%\nSnapshots: %instance_snapshots_total%"
         }
     },
@@ -48,7 +48,7 @@
             "text": "*InstanceID:* %instance_id%\n*InstanceName:* %instance_name%\n*Volumes:* %instance_volumes_wt%\n*Snapshots:* %instance_snapshots_total%"
         }
     },
-    "slack_users": ["#rma_test"],
+    "slack_users": ["#slack_channel", "#slack_cnannel2"],
     "log_location": "/tmp/aws-snapshot.log",
     "log_level": "INFO",
     "debug": true

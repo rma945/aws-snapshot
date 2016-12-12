@@ -246,7 +246,8 @@ def ec2_create_snapshot(volume_id):
 
 
 def message_replace_macros(message_text):
-    macros_dict = {"%instance_id%": current_instance_id,
+    macros_dict = {"%action%": configuration["snapshot_action"],
+                   "%instance_id%": current_instance_id,
                    "%instance_name%": current_instance_name,
                    "%instance_volumes%": ", ".join(map(str, current_instance_snapshots_dict["snapshots_list_volumes"])),
                    "%instance_volumes_wt%": ", ".join("{0}: {1}".format(volume, len(snapshot)) for volume, snapshot in current_instance_snapshots_dict["snapshots_list_volumes"].items()),
@@ -360,7 +361,7 @@ if __name__ == "__main__":
             for snapshot_id in deleted_snapshots_list:
                 # Save reserved snapshots
                 if len(current_instance_snapshots_dict['snapshots_list_volumes'][snapshot_volume]) <= configuration["snapshot_save_count"]:
-                    print 'Saving last snapshots: {0}}'.format(len(current_instance_snapshots_dict['snapshots_list_volumes'][snapshot_volume]))
+                    print_debug_message('save reserved snapshots')
                     break
                 snapshot_id.delete()
                 print_debug_message("deleting volume:snapshot - {0}:{1}".format(snapshot_volume, snapshot_id))
@@ -373,7 +374,9 @@ if __name__ == "__main__":
     if configuration["snapshot_action"] in ("default", "create"):
         for volume_id in current_instance_snapshots_dict['snapshots_list_volumes_expired']:
             print_debug_message("volume: {0} creating snapshot".format(volume_id))
-            ec2_create_snapshot(volume_id)
+            snapshot_id = ec2_create_snapshot(volume_id)
+            current_instance_snapshots_dict['snapshots_list_total'].append(snapshot_id)
+            current_instance_snapshots_dict['snapshots_list_volumes'][volume_id].append(snapshot_id)
 
     slack_send_notification()
     email_send_notifications()
