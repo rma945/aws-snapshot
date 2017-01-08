@@ -18,29 +18,76 @@ def init_configuration():
         "aws_key_id": "",
         "aws_key_secret": "",
         "aws_api_version": "2015-10-01",
-        "snapshot_action": "status",
+        "snapshot_action": "default",
         "snapshot_volumes": ["all"],
         "snapshot_name": "%instance_name%-%volume_id%-%date_short%",
         "snapshot_expire_search": "instance-id-tag",
         "snapshot_expire_days": 15,
-        "snapshot_save_count": 3,
-        "slack_notify_on": ["failure", "success"],
-        "email_notify_on": ["failure", "success"],
-        "smtp_connection": {"server": "", "port": 0, "tls": False, "user": "", "password": ""},
-        "email_users": [""],
-        "slack_connection": {"api_key": "",
-                             "bot_name": "aws-backup", "bot_icon_success": ":heart:",
-                             "bot_icon_failure": ":broken_heart:"},
-        "slack_message_template": {"failure": [], "success": []},
-        "slack_users": [""],
-        "log_location": "{0}/aws-snapshot.log".format(gettempdir()),
+        "snapshot_save_count": 1,
+        "slack_notify_on": [],
+        "email_notify_on": [],
+        "smtp_connection": {
+            "server": "",
+            "port": 25,
+            "tls": False,
+            "user": "",
+            "password": "",
+            "from": ""
+        },
+        "email_users": [],
+        "email_message_template": {
+            "failure": {
+                "subject": "%action% for %instance_name%:%instance_id% - failed",
+                "text": "InstanceID: %instance_id%\n"
+                        "InstanceName: %instance_name%\n"
+                        "Volumes: %instance_volumes%\n"
+                        "Snapshots: %instance_snapshots_total%"
+            },
+            "success": {
+                "subject": "%action% for %instance_name%:%instance_id% - success",
+                "text": "InstanceID: %instance_id%\n"
+                        "InstanceName: %instance_name%\n"
+                        "Volumes: %instance_volumes%\n"
+                        "Snapshots: %instance_snapshots_total%"
+            }
+        },
+        "slack_connection": {
+            "api_key": "",
+            "bot_name": "aws-backup-bot"
+        },
+        "slack_message_template": {
+            "failure": {
+                "title": "Backup: failure",
+                "icon": ":broken_heart:",
+                "line_color": "#F71138",
+                "text": "*InstanceID:* %instance_id%\n"
+                        "*InstanceName:* %instance_name%\n"
+                        "*Volumes:* %instance_volumes_wt%\n"
+                        "*Snapshots:* %instance_snapshots_total%\n"
+                        "*Errors:* %error_logs%"
+            },
+            "success": {
+                "title": "Backup: success",
+                "icon": ":heart:",
+                "line_color": "#36a64f",
+                "text": "*InstanceID:* %instance_id%\n"
+                        "*InstanceName:* %instance_name%\n"
+                        "*Volumes:* %instance_volumes_wt%\n"
+                        "*Snapshots:* %instance_snapshots_total%"
+            }
+        },
+        "slack_users": [],
+        "log_location": "/tmp/aws-snapshot.log",
         "log_level": "INFO",
-        "debug": True
+        "debug": False
     }
 
     # Try load configuration from local config file
     if path.exists(default_config_file):
-        configuration = load_configuration_file(default_config_file)
+        loaded_configuration = load_configuration_file(default_config_file)
+        configuration = dict(configuration.items() + loaded_configuration.items())
+    else:
+        print_debug_message('Configuration file not found. Using default configuration')
 
     # Parsing startup options
     cmd_options = ''
@@ -84,18 +131,18 @@ def init_configuration():
 
 def show_help():
     print """Saritasa AWS snapshot tool
-Usage:
-   -h, --help - for help
-   -d, --debug - show debug information
-   --config='' - set path for configuration file
-   --aws_key_id='' - set AWS_ACCESS_KEY_ID
-   --aws_secret_key='' - set AWS_SECRET_ACCESS_KEY
-   --aws_region='' - set AWS_DEFAULT_REGION
-   --action='' - set script action - 'default\delete\\create\status'
-   --snapshot_name='' - set custom snapshot prefix name. Default: %instance_name%-%volume_id%-%date_short%
-   --snapshot_expire_search='volume-id|instance-id-tag' - search expired snapshots by special instance-id-tag or by attached volume-id
-   --snapshot_expire_days= - set amount of days after that snapshots will be expired
-   --snapshot_save_count= - minimum number of snapshots for save"""
+    Usage:
+       -h, --help - for help
+       -d, --debug - show debug information
+       --config='' - set path for configuration file
+       --aws_key_id='' - set AWS_ACCESS_KEY_ID
+       --aws_secret_key='' - set AWS_SECRET_ACCESS_KEY
+       --aws_region='' - set AWS_DEFAULT_REGION
+       --action='' - set script action - 'default\delete\\create\status'
+       --snapshot_name='' - set custom snapshot prefix name. Default: %instance_name%-%volume_id%-%date_short%
+       --snapshot_expire_search='volume-id|instance-id-tag' - search expired snapshots by special instance-id-tag or by attached volume-id
+       --snapshot_expire_days= - set amount of days after that snapshots will be expired
+       --snapshot_save_count= - minimum number of snapshots for save"""
     sys.exit(0)
 
 
@@ -155,7 +202,7 @@ def ec2_get_instance_region():
             response = requests.get('http://169.254.169.254/latest/meta-data/placement/availability-zone', timeout=5)
             return response.text
         except requests.exceptions.ConnectTimeout:
-            log_error("Failed to get instance AWS region")
+            log_error("Failed to get default instance AWS region")
     else:
         return configuration["aws_region"]
 
@@ -375,8 +422,6 @@ if __name__ == "__main__":
         for volume_id in current_instance_snapshots_dict['snapshots_list_volumes_expired']:
             print_debug_message("volume: {0} creating snapshot".format(volume_id))
             snapshot_id = ec2_create_snapshot(volume_id)
-            current_instance_snapshots_dict['snapshots_list_total'].append(snapshot_id)
-            current_instance_snapshots_dict['snapshots_list_volumes'][volume_id].append(snapshot_id)
 
     slack_send_notification()
     email_send_notifications()
