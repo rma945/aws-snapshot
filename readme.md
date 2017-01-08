@@ -110,7 +110,7 @@ For enable email notifications you need specify SMTP server, SMTP credentials, T
 ```json
 {
     "email_notify_on": ["failure", "success"],
-    "email_users": ["myemail@myserver.com", "my-second-email@myserver.com"]
+    "email_users": ["myemail@myserver.com", "my-second-email@myserver.com"],
     "smtp_connection": {
         "server": "smtp.myserver.com",
         "port": 587,
@@ -123,6 +123,16 @@ For enable email notifications you need specify SMTP server, SMTP credentials, T
 ```
 
 ###### Message templates
+
+### Build binary
+##### PyInstaller
+This script uses several python dependency, and for easy deployment better convert this script to standalone binary with [pyInstaller](http://www.pyinstaller.org/):
+
+```bash
+```
+
+##### RPM
+##### DEB
 
 ### License
 BSD License
