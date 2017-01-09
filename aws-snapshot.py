@@ -91,8 +91,12 @@ def init_configuration():
     # Parsing startup options
     cmd_options = ''
     try:
-        cmd_options, cmd_arguments = getopt.getopt(sys.argv[1:], "hd", ["help", "debug", "config=",
-                                                                        "action=", "aws_key_id=", "aws_secret_key=",
+        cmd_options, cmd_arguments = getopt.getopt(sys.argv[1:], "hd", ["help",
+                                                                        "debug",
+                                                                        "config=",
+                                                                        "action=",
+                                                                        "aws_key_id=",
+                                                                        "aws_secret_key=",
                                                                         "aws_region="])
     except getopt.GetoptError:
         show_help()
@@ -129,19 +133,17 @@ def init_configuration():
 
 
 def show_help():
-    print """
-Usage:
-   -h, --help - for help
-   -d, --debug - show debug information
-   --config='' - set path for configuration file
-   --aws_key_id='' - set AWS_ACCESS_KEY_ID
-   --aws_secret_key='' - set AWS_SECRET_ACCESS_KEY
-   --aws_region='' - set AWS_DEFAULT_REGION
-   --action='' - set script action - 'default\delete\\create\status'
-   --snapshot_name='' - set custom snapshot prefix name. Default: %instance_name%-%volume_id%-%date_short%
-   --snapshot_expire_search='volume-id|instance-id-tag' - search expired snapshots by special instance-id-tag or by attached volume-id
-   --snapshot_expire_days= - set amount of days after that snapshots will be expired
-   --snapshot_save_count= - minimum number of snapshots for save"""
+    print ("Usage:\n"
+           "-h, --help - for help\n"
+           "-d, --debug - show debug information\n"
+           "--config='' - set path for configuration file\n"
+           "--aws_key_id='' - set AWS_ACCESS_KEY_ID\n"
+           "--aws_secret_key='' - set AWS_SECRET_ACCESS_KEY\n"
+           "--aws_region='' - set AWS_DEFAULT_REGION\n"
+           "--action='' - set script action - 'default\delete\\create\status'\n"
+           "--snapshot_name='' - set custom snapshot prefix name. Default: %instance_name%-%volume_id%-%date_short%\n"
+           "--snapshot_expire_days= - set amount of days after that snapshots will be expired\n"
+           "--snapshot_save_count= - minimum number of snapshots for save")
     sys.exit(0)
 
 
@@ -156,7 +158,7 @@ def load_configuration_file(configuration_file_path, exit_on_error=False):
             return json_configuration
 
     except IOError:
-        print "can`t load config file - {0}, exiting".format(configuration_file_path)
+        print ("can`t load config file - {0}, exiting".format(configuration_file_path))
         if exit_on_error:
             sys.exit(1)
 
@@ -177,7 +179,7 @@ def log_error(error_message=""):
 def print_debug_message(debug_message=""):
     logging.info(debug_message)
     if configuration["debug"]:
-        print debug_message
+        print (debug_message)
 
 
 def snapshot_generate_name(instance_name="", volume_id=""):
@@ -198,8 +200,8 @@ def snapshot_generate_name(instance_name="", volume_id=""):
 def ec2_get_instance_region():
     if not configuration["aws_region"]:
         try:
-            response = requests.get('http://169.254.169.254/latest/meta-data/placement/availability-zone', timeout=5)
-            return response.text
+            response = requests.get("http://169.254.169.254/latest/dynamic/instance-identity/document", timeout=5)
+            return response.json()["region"]
         except requests.exceptions.ConnectTimeout:
             log_error("Failed to get default instance AWS region")
     else:
