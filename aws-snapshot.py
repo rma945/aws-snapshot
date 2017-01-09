@@ -4,7 +4,7 @@ from datetime import datetime
 from pytz import UTC
 from os import getenv, path
 from json import load
-from tempfile import gettempdir
+from socket import gethostname
 import requests
 import logging
 import getopt
@@ -84,10 +84,9 @@ def init_configuration():
 
     # Try load configuration from local config file
     if path.exists(default_config_file):
-        loaded_configuration = load_configuration_file(default_config_file)
-        configuration = dict(configuration.items() + loaded_configuration.items())
+        configuration.update(load_configuration_file(default_config_file))
     else:
-        print_debug_message('Configuration file not found. Using default configuration')
+        print ('Configuration file not found. Using default configuration')
 
     # Parsing startup options
     cmd_options = ''
@@ -130,19 +129,19 @@ def init_configuration():
 
 
 def show_help():
-    print """Saritasa AWS snapshot tool
-    Usage:
-       -h, --help - for help
-       -d, --debug - show debug information
-       --config='' - set path for configuration file
-       --aws_key_id='' - set AWS_ACCESS_KEY_ID
-       --aws_secret_key='' - set AWS_SECRET_ACCESS_KEY
-       --aws_region='' - set AWS_DEFAULT_REGION
-       --action='' - set script action - 'default\delete\\create\status'
-       --snapshot_name='' - set custom snapshot prefix name. Default: %instance_name%-%volume_id%-%date_short%
-       --snapshot_expire_search='volume-id|instance-id-tag' - search expired snapshots by special instance-id-tag or by attached volume-id
-       --snapshot_expire_days= - set amount of days after that snapshots will be expired
-       --snapshot_save_count= - minimum number of snapshots for save"""
+    print """
+Usage:
+   -h, --help - for help
+   -d, --debug - show debug information
+   --config='' - set path for configuration file
+   --aws_key_id='' - set AWS_ACCESS_KEY_ID
+   --aws_secret_key='' - set AWS_SECRET_ACCESS_KEY
+   --aws_region='' - set AWS_DEFAULT_REGION
+   --action='' - set script action - 'default\delete\\create\status'
+   --snapshot_name='' - set custom snapshot prefix name. Default: %instance_name%-%volume_id%-%date_short%
+   --snapshot_expire_search='volume-id|instance-id-tag' - search expired snapshots by special instance-id-tag or by attached volume-id
+   --snapshot_expire_days= - set amount of days after that snapshots will be expired
+   --snapshot_save_count= - minimum number of snapshots for save"""
     sys.exit(0)
 
 
@@ -217,7 +216,7 @@ def ec2_get_instance_id():
 
 
 def ec2_get_instance_name(instance_id):
-    instance_name = 'UnknownInstance'
+    instance_name = gethostname()
 
     try:
         instance = ec2.Instance(instance_id)
@@ -225,7 +224,7 @@ def ec2_get_instance_name(instance_id):
             if instance_tag["Key"] == "Name" and instance_tag["Value"]:
                 instance_name = instance_tag["Value"]
     except:
-        log_error("Failed to get instance name: unknown API error")
+        log_error("Failed to get instance name: unknown API error. Using hostname")
 
     return instance_name
 
@@ -389,7 +388,7 @@ if __name__ == "__main__":
     except botocore.exceptions.ClientError as e:
         log_error("Failed connect to AWS: {0}".format(e))
 
-    # Connect to AWS ec2 resource point # may be defined in aws session - Resource
+    # Connect to AWS EC2
     try:
         ec2 = aws_session.resource(service_name="ec2", api_version=configuration["aws_api_version"])
     except:

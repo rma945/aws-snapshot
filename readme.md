@@ -83,7 +83,7 @@ Also can save some expired snapshots, if something going wrong, and new snapshot
 ```json
 {
     "snapshot_expire_days": 30,
-    "snapshot_save_count": 1,
+    "snapshot_save_count": 1
 }
 ```
 
@@ -125,10 +125,11 @@ For enable email notifications you need specify SMTP server, SMTP credentials, T
 ###### Message templates
 
 ### Build binary
-##### PyInstaller
 This script uses several python dependency, and for easy deployment better convert this script to standalone binary with [pyInstaller](http://www.pyinstaller.org/):
 
+##### PyInstaller
 ```bash
+pyinstaller --specpath /tmp/ --distpath ./ -F --clean --hidden-import=HTMLParser ./aws-snapshot.py
 ```
 
 ##### RPM
